@@ -58,7 +58,7 @@ English summary: a view-only Android app for standard USB Video Class cameras (w
 
 Потрібні JDK 17 і Android SDK з платформою Android 35.
 
-У корені проєкту створіть `local.properties` (цей файл не входить до репозиторію):
+У корені проекту створіть `local.properties` (цей файл не входить до репозиторію):
 
 ```text
 sdk.dir=C:/Android/Sdk
@@ -90,7 +90,7 @@ Linux і macOS:
 
 Фільтр USB у маніфесті: клас 14 (підкласи 1 і 2) і складений пристрій класу 239 підкласу 2.
 
-## Склад проєкту
+## Склад проекту
 
 - `app/src/main/java/ua/uvc/viewer/MainActivity.kt` — вікно програми і передача USB-пристрою з інтента.
 - `ViewerScreen.kt` — інтерфейс. Картинка малюється в `FrameView`: кадр RGB565 копіюється в растр, поворот і дзеркало застосовуються під час малювання. Так кадр займає ширину екрана і не залежить від чорного OpenGL-шару бібліотеки.
