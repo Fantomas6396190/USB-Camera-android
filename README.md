@@ -2,11 +2,11 @@
 
 Android-програма для живого перегляду відео з USB-камер, які працюють як стандартний UVC. Окремий драйвер виробника не потрібен. Програма лише показує картинку: не робить фото, не записує відео і не просить доступ до пам’яті.
 
-English summary: a view-only Android app for standard USB Video Class cameras (webcams, endoscopes, capture cards). No vendor driver, no photos, no recording, no storage permission. The latest installable build is [`USB-Camera.apk`](USB-Camera.apk) (version 2.0).
+English summary: a view-only Android app for standard USB Video Class cameras (webcams, endoscopes, capture cards). No vendor driver, no photos, no recording, no storage permission. The latest installable build is [`USB-Camera.apk`](USB-Camera.apk) (version 2.1).
 
 ## Встановлення
 
-Готовий файл: **[USB-Camera.apk](USB-Camera.apk)**, версія **2.0**.
+Готовий файл: **[USB-Camera.apk](USB-Camera.apk)**, версія **2.1**.
 
 1. Скопіюйте `USB-Camera.apk` на телефон.
 2. Відкрийте файл і дозвольте встановлення з цього джерела.
@@ -19,7 +19,7 @@ English summary: a view-only Android app for standard USB Video Class cameras (w
 ## Що вміє
 
 - Живе відео зі стандартної UVC-камери (клас USB 14).
-- Вибір формату і частоти кадрів. На старті береться найбільший MJPEG, який камера віддає, на 30 кадрах/с. 60 кадрів багато дешевих камер оголошують, але картинки не дають. Якщо великий режим не відкрився, програма сама пробує менший.
+- Вибір формату і частоти кадрів. На старті береться найбільший MJPEG на 30 кадрах/с. Якщо з цього режиму не приходить жоден кадр, програма сама переходить на менший. 60 кадрів багато дешевих камер оголошують, але картинки не дають.
 - **Поворот** на 90° кожне натискання. Повернутий кадр займає всю ширину екрана.
 - **Дзеркало** — ліво і право міняються місцями так, як їх видно на екрані.
 - Яскравість, контраст, фокус, баланс білого та інші параметри, якщо їх віддає сама камера.

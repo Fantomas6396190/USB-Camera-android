@@ -102,6 +102,8 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var frameHeight = 0
     private var frameCopy = ByteArray(0)
     private var modeSwitch = 0
+    private var previewWatch = 0
+    @Volatile private var sawFrame = false
     var onVideoFrame: ((ByteArray, Int, Int) -> Unit)? = null
 
     private val frameCallback = IFrameCallback { frame ->
@@ -148,28 +150,23 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             val supported = helper.supportedSizeList.orEmpty()
             val current = helper.previewSize
             Log.i(TAG, "camera open current=$current list=" + supported.joinToString { it.toString() })
-            if (!userRequested && !retuned) {
+            if (!userRequested && ladder.isEmpty()) {
                 ladder = qualityLadder(supported)
                 ladderIndex = 0
-                retuned = true
-                val best = ladder.firstOrNull()
-                if (best != null && !sameStream(best, current)) {
-                    viewModelScope.launch {
-                        runCatching { helper.closeCamera() }
-                        openCamera(best)
-                    }
-                    return
-                }
             }
-            lastGood = current?.clone()
+            retuned = true
+            val size = if (userRequested) current else ladder.getOrNull(ladderIndex) ?: current
             autoStep = 0
             userRequested = false
             applyPreviewConfig(helper)
-            armFrames(current)
-            runCatching { helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RGB565) }
-            startPicture(helper, current)
-            framesEnabled.set(frameWidth > 0 && frameHeight > 0)
-            publishOpened(device, current, supported)
+            val controls = _state.value.controls.ifEmpty { readControls() }
+            if (size != null) {
+                beginPreview(helper, size)
+                publishOpened(device, size, supported, controls)
+                watchForFrames(helper, device, supported)
+            } else {
+                publishOpened(device, current, supported, controls)
+            }
         }
 
         override fun onCameraClose(device: UsbDevice) {
@@ -332,9 +329,8 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         if (sameStream(size, helper.previewSize)) return
         userRequested = true
         retuned = true
-        val switch = ++modeSwitch
-        framesEnabled.set(false)
-        frameBusy.set(false)
+        previewWatch += 1
+        modeSwitch += 1
         _state.update {
             it.copy(
                 modeLabel = modeLabel(size),
@@ -343,19 +339,7 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
                 modes = groupModes(helper.supportedSizeList.orEmpty(), size),
             )
         }
-        // Кадр не чіпає камеру. Інакше stopPreview чекає кадр, а кадр чекає камеру.
-        runCatching { helper.setFrameCallback(null, 0) }
-        runCatching { helper.stopPreview() }
-        runCatching { helper.setPreviewSize(size) }
-        armFrames(size)
-        runCatching { helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RGB565) }
-        startPicture(helper, size)
-        framesEnabled.set(true)
-        lastGood = size.clone()
-        mainHandler.postDelayed({
-            if (switch != modeSwitch || !framesEnabled.get()) return@postDelayed
-            if (!helper.isCameraOpened) openCamera(size)
-        }, 400)
+        beginPreview(helper, size)
     }
 
     fun rotate() {
@@ -464,6 +448,34 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
+    private fun beginPreview(helper: CameraHelper, size: Size) {
+        framesEnabled.set(false)
+        frameBusy.set(false)
+        sawFrame = false
+        runCatching { helper.setFrameCallback(null, 0) }
+        runCatching { helper.stopPreview() }
+        runCatching { helper.setPreviewSize(size) }
+        armFrames(size)
+        runCatching { helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RGB565) }
+        startPicture(helper, size)
+        framesEnabled.set(frameWidth > 0 && frameHeight > 0)
+        lastGood = size.clone()
+    }
+
+    private fun watchForFrames(helper: CameraHelper, device: UsbDevice, supported: List<Size>) {
+        val watch = ++previewWatch
+        mainHandler.postDelayed({
+            if (watch != previewWatch || userRequested || sawFrame) return@postDelayed
+            if (!helper.isCameraOpened) return@postDelayed
+            val next = ladder.getOrNull(ladderIndex + 1) ?: return@postDelayed
+            ladderIndex += 1
+            Log.i(TAG, "no frames, step down to $next")
+            beginPreview(helper, next)
+            publishOpened(device, next, supported, _state.value.controls)
+            watchForFrames(helper, device, supported)
+        }, 1600)
+    }
+
     private fun startPicture(helper: CameraHelper, size: Size?) {
         val width = (size?.width ?: 640).coerceAtLeast(2)
         val height = (size?.height ?: 480).coerceAtLeast(2)
@@ -502,6 +514,7 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             frameBusy.set(false)
             return
         }
+        sawFrame = true
         var copy = frameCopy
         if (copy.size != bytes) {
             copy = ByteArray(bytes)
@@ -528,8 +541,12 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
-    private fun publishOpened(device: UsbDevice, current: Size?, supported: List<Size>) {
-        val controls = readControls()
+    private fun publishOpened(
+        device: UsbDevice,
+        current: Size?,
+        supported: List<Size>,
+        controls: List<ControlUi> = readControls(),
+    ) {
         _state.update {
             it.copy(
                 phase = Phase.Preview,
