@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">USB Камера</string>
+    <string name="empty_title">Камеру не знайдено</string>
+    <string name="empty_body">Підключіть камеру кабелем OTG. Підійде веб-камера, ендоскоп або карта захоплення, якщо вона працює як стандартний UVC — окремий драйвер виробника не потрібен.\n\nКоли телефон запитає доступ до USB, натисніть «Дозволити».</string>
+    <string name="permission_body">Підтвердьте доступ до USB у системному вікні. Без цього Android не віддає картинку з камери.</string>
+    <string name="opening_body">Відкриваю камеру…</string>
+    <string name="found_title">Камеру знайдено</string>
+    <string name="found_body">Натисніть «Дозволити». Якщо телефон питає, якою програмою відкрити USB, оберіть «USB Камера», а потім у наступному вікні підтвердьте доступ.</string>
+    <string name="allow_access">Дозволити</string>
+    <string name="denied">Система закрила запит доступу, поки зверху було інше вікно. Натисніть «Дозволити» ще раз і підтвердьте доступ до USB.</string>
+    <string name="busy">Камера зайнята іншою програмою. Від\'єднайте USB і підключіть знову.</string>
+    <string name="open_failed">Не вдалося відкрити потік. Спробуйте нижчу роздільність або перепідключіть камеру.</string>
+    <string name="mode_failed">Цей формат камера не прийняла. Повертаю попередній.</string>
+    <string name="format">Формат</string>
+    <string name="picture">Зображення</string>
+    <string name="mirror">Дзеркало</string>
+    <string name="mirror_on">Дзеркало вкл</string>
+    <string name="rotate">Поворот</string>
+    <string name="devices">Камери</string>
+    <string name="format_hint">MJPEG легший для телефона і зазвичай дає живе відео без ривків. YUYV різкіший, але на USB 2.0 висока роздільність часто не вміщується в канал.</string>
+    <string name="no_controls">Ця камера не повідомляє про яскравість, фокус та інші UVC-параметри.</string>
+    <string name="reset">Скинути</string>
+    <string name="close">Закрити</string>
+    <string name="brightness">Яскравість</string>
+    <string name="contrast">Контраст</string>
+    <string name="saturation">Насиченість</string>
+    <string name="sharpness">Різкість</string>
+    <string name="gamma">Гама</string>
+    <string name="gain">Підсилення</string>
+    <string name="white_balance">Баланс білого</string>
+    <string name="white_balance_auto">Автобаланс білого</string>
+    <string name="focus">Фокус</string>
+    <string name="focus_auto">Автофокус</string>
+    <string name="zoom">Зум</string>
+    <string name="exposure">Витримка</string>
+    <string name="exposure_auto">Автоекспозиція</string>
+    <string name="backlight">Компенсація підсвітки</string>
+    <string name="powerline">Мерехтіння ламп</string>
+    <string name="powerline_off">Вимк</string>
+    <string name="powerline_50">50 Гц</string>
+    <string name="powerline_60">60 Гц</string>
+    <string name="powerline_auto">Авто</string>
+    <string name="native_failed">Не вдалося завантажити USB-бібліотеку камери</string>
+</resources>

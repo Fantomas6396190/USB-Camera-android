@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+.idea/
+.kotlin/
+.cxx/
+local.properties
+captures/
+.externalNativeBuild/
+build/
+.jdk/
+.android-sdk/
+*.apk
+!USB-Camera.apk
+*.aab
+.DS_Store
