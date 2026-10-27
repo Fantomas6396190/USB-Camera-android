@@ -12,8 +12,8 @@ android {
         applicationId = "ua.uvc.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "2.1"
+        versionCode = 15
+        versionName = "2.4"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")

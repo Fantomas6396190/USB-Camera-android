@@ -5,6 +5,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.graphics.SurfaceTexture
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -96,11 +97,15 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
     private var exposureLimits: IntArray? = null
     private var backlightLimits: IntArray? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val convertThread = HandlerThread("uvc-yuy2").also { it.start() }
+    private val convertHandler = Handler(convertThread.looper)
     private val frameBusy = AtomicBoolean(false)
     private val framesEnabled = AtomicBoolean(false)
     @Volatile private var frameWidth = 0
     @Volatile private var frameHeight = 0
+    @Volatile private var frameIsYuy2 = false
     private var frameCopy = ByteArray(0)
+    private var rgbOut = ByteArray(0)
     private var modeSwitch = 0
     private var previewWatch = 0
     @Volatile private var sawFrame = false
@@ -441,6 +446,8 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         onVideoFrame = null
         runCatching { helper?.setFrameCallback(null, 0) }
         runCatching { helper?.release() }
+        convertHandler.removeCallbacksAndMessages(null)
+        convertThread.quitSafely()
         previewSurface?.release()
         previewSurface = null
         streamTexture?.release()
@@ -456,7 +463,9 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { helper.stopPreview() }
         runCatching { helper.setPreviewSize(size) }
         armFrames(size)
-        runCatching { helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RGB565) }
+        frameIsYuy2 = size.type == UVCCamera.UVC_VS_FRAME_UNCOMPRESSED
+        val pixels = if (frameIsYuy2) UVCCamera.PIXEL_FORMAT_RAW else UVCCamera.PIXEL_FORMAT_RGB565
+        runCatching { helper.setFrameCallback(frameCallback, pixels) }
         startPicture(helper, size)
         framesEnabled.set(frameWidth > 0 && frameHeight > 0)
         lastGood = size.clone()
@@ -521,13 +530,33 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             frameCopy = copy
         }
         source.get(copy)
-        mainHandler.post {
-            try {
-                if (framesEnabled.get()) onVideoFrame?.invoke(copy, width, height)
-            } finally {
-                frameBusy.set(false)
+        if (frameIsYuy2) {
+            convertHandler.post {
+                val rgb = rgbBytes(width, height)
+                yuy2ToRgb565(copy, rgb, width, height)
+                mainHandler.post {
+                    try {
+                        if (framesEnabled.get()) onVideoFrame?.invoke(rgb, width, height)
+                    } finally {
+                        frameBusy.set(false)
+                    }
+                }
+            }
+        } else {
+            mainHandler.post {
+                try {
+                    if (framesEnabled.get()) onVideoFrame?.invoke(copy, width, height)
+                } finally {
+                    frameBusy.set(false)
+                }
             }
         }
+    }
+
+    private fun rgbBytes(width: Int, height: Int): ByteArray {
+        val bytes = width * height * 2
+        if (rgbOut.size != bytes) rgbOut = ByteArray(bytes)
+        return rgbOut
     }
 
     private fun openCamera(size: Size) {
@@ -703,6 +732,37 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             val range = kotlin.math.abs(limits[1] - limits[0])
             if (range == 0) return 0
             return ((value - limits[0]) * 100f / range).toInt().coerceIn(0, 100)
+        }
+
+        private fun yuy2ToRgb565(src: ByteArray, dst: ByteArray, width: Int, height: Int) {
+            val pairs = width * height / 2
+            var s = 0
+            var d = 0
+            var pair = 0
+            while (pair < pairs && s + 3 < src.size && d + 3 < dst.size) {
+                val y0 = src[s].toInt() and 0xFF
+                val u = (src[s + 1].toInt() and 0xFF) - 128
+                val y1 = src[s + 2].toInt() and 0xFF
+                val v = (src[s + 3].toInt() and 0xFF) - 128
+                s += 4
+                write565(dst, d, y0, u, v)
+                write565(dst, d + 2, y1, u, v)
+                d += 4
+                pair++
+            }
+        }
+
+        private fun write565(dst: ByteArray, offset: Int, y: Int, u: Int, v: Int) {
+            val c = y - 16
+            var r = (298 * c + 409 * v + 128) shr 8
+            var g = (298 * c - 100 * u - 208 * v + 128) shr 8
+            var b = (298 * c + 516 * u + 128) shr 8
+            if (r < 0) r = 0 else if (r > 255) r = 255
+            if (g < 0) g = 0 else if (g > 255) g = 255
+            if (b < 0) b = 0 else if (b > 255) b = 255
+            val pixel = ((r and 0xF8) shl 8) or ((g and 0xFC) shl 3) or (b shr 3)
+            dst[offset] = (pixel and 0xFF).toByte()
+            dst[offset + 1] = ((pixel shr 8) and 0xFF).toByte()
         }
 
         private fun percentToValue(limits: IntArray?, percent: Int): Int? {

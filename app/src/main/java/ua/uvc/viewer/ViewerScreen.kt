@@ -6,7 +6,9 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.widget.ImageView
 import java.nio.ByteBuffer
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -47,7 +49,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -56,6 +61,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 
@@ -75,6 +83,8 @@ fun ViewerScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var sheet by remember { mutableStateOf(Sheet.None) }
+    var fullscreen by remember { mutableStateOf(false) }
+    var reticle by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     DisposableEffect(state.phase) {
@@ -92,6 +102,25 @@ fun ViewerScreen(
             delay(4200)
             viewModel.dismissNotice()
         }
+    }
+
+    LaunchedEffect(state.phase) {
+        if (state.phase != Phase.Preview) fullscreen = false
+    }
+
+    DisposableEffect(fullscreen) {
+        val window = (context as? android.app.Activity)?.window
+        val controller = window?.let {
+            WindowCompat.getInsetsController(it, it.decorView)
+        }
+        if (fullscreen) {
+            controller?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
     }
 
     Box(
@@ -119,7 +148,24 @@ fun ViewerScreen(
             )
         }
 
-        Column(
+        if (reticle && state.phase == Phase.Preview) {
+            SightMark(modifier = Modifier.fillMaxSize())
+        }
+
+        if (state.phase == Phase.Preview) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(fullscreen) {
+                        detectTapGestures(onDoubleTap = {
+                            fullscreen = !fullscreen
+                            if (fullscreen) sheet = Sheet.None
+                        })
+                    },
+            )
+        }
+
+        if (!fullscreen) Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
@@ -151,6 +197,15 @@ fun ViewerScreen(
                         color = Mist,
                     )
                 }
+                TextButton(
+                    onClick = { reticle = !reticle },
+                    enabled = state.phase == Phase.Preview,
+                ) {
+                    Text(
+                        text = stringResource(if (reticle) R.string.reticle_on else R.string.reticle),
+                        color = if (reticle) Amber else Mist,
+                    )
+                }
             }
             state.notice?.let { notice ->
                 Spacer(Modifier.height(6.dp))
@@ -158,7 +213,7 @@ fun ViewerScreen(
             }
         }
 
-        Row(
+        if (!fullscreen) Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
@@ -183,7 +238,7 @@ fun ViewerScreen(
         }
     }
 
-    if (sheet != Sheet.None) {
+    if (sheet != Sheet.None && !fullscreen) {
         ModalBottomSheet(
             onDismissRequest = { sheet = Sheet.None },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -311,6 +366,25 @@ private class FrameView(context: android.content.Context) : ImageView(context) {
         canvas.rotate(pictureRotation.toFloat())
         canvas.drawBitmap(current, src, dst, null)
         canvas.restore()
+    }
+}
+
+@Composable
+private fun SightMark(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val gap = 10f
+        val mark = 18f
+        val marks = arrayOf(
+            Offset(center.x - gap - mark, center.y) to Offset(center.x - gap, center.y),
+            Offset(center.x + gap, center.y) to Offset(center.x + gap + mark, center.y),
+            Offset(center.x, center.y - gap - mark) to Offset(center.x, center.y - gap),
+            Offset(center.x, center.y + gap) to Offset(center.x, center.y + gap + mark),
+        )
+        marks.forEach { (start, end) ->
+            drawLine(Color.Black, start, end, strokeWidth = 4f, cap = StrokeCap.Butt)
+            drawLine(Color.White, start, end, strokeWidth = 2f, cap = StrokeCap.Butt)
+        }
     }
 }
 

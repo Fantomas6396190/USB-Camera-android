@@ -17,6 +17,8 @@
     <string name="mirror">Дзеркало</string>
     <string name="mirror_on">Дзеркало вкл</string>
     <string name="rotate">Поворот</string>
+    <string name="reticle">Приціл</string>
+    <string name="reticle_on">Приціл вкл</string>
     <string name="devices">Камери</string>
     <string name="format_hint">MJPEG легший для телефона і зазвичай дає живе відео без ривків. YUYV різкіший, але на USB 2.0 висока роздільність часто не вміщується в канал.</string>
     <string name="no_controls">Ця камера не повідомляє про яскравість, фокус та інші UVC-параметри.</string>
