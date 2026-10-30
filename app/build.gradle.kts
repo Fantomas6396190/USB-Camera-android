@@ -12,8 +12,8 @@ android {
         applicationId = "ua.uvc.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "2.4"
+        versionCode = 36
+        versionName = "4.5"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
@@ -62,6 +62,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("com.herohan:UVCAndroid:1.0.13")
+    implementation(files("libs/UVCAndroid-1.0.13.aar"))
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

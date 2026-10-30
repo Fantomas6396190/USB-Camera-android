@@ -1,9 +1,15 @@
 package ua.uvc.viewer
 
 import android.app.Application
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.graphics.SurfaceTexture
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -75,6 +81,7 @@ data class ViewerState(
     val controls: List<ControlUi> = emptyList(),
     val rotation: Int = 0,
     val mirrored: Boolean = false,
+    val streamNote: String? = null,
 )
 
 class UvcViewModel(app: Application) : AndroidViewModel(app) {
@@ -82,6 +89,8 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<ViewerState> = _state
 
     private var cameraHelper: CameraHelper? = null
+    private var kurbas: KurbasBulkCamera? = null
+    private var usbPermissionReceiver: BroadcastReceiver? = null
     private var previewSurface: Surface? = null
     private var streamTexture: SurfaceTexture? = null
     private var currentDeviceId: String? = null
@@ -93,6 +102,11 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
     private var ladderIndex = 0
     private var userRequested = false
     private var retuned = false
+    private var sizeAttempts = 0
+    private var reopenGeneration = 0
+    private var reopenPending = false
+    private var openWatch = 0
+    private var previewStarted = false
     private var lastGood: Size? = null
     private var exposureLimits: IntArray? = null
     private var backlightLimits: IntArray? = null
@@ -143,11 +157,25 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             Log.i(TAG, "device open ${device.deviceName} first=$isFirstOpen")
             currentDeviceId = device.deviceName
             connectInProgress = false
+            previewStarted = false
+            // The camera screen shows at once. Waiting here for the USB
+            // handshake left the text "Відкриваю камеру…" on screen.
             _state.update {
-                it.copy(phase = Phase.Opening, deviceLabel = device.displayLabel())
+                it.copy(phase = Phase.Preview, deviceLabel = device.displayLabel(), notice = null)
             }
             refreshDevices()
             openCamera(fallbackSize(autoStep))
+            val watch = ++openWatch
+            mainHandler.postDelayed({
+                if (watch != openWatch || previewStarted) return@postDelayed
+                val helper = cameraHelper ?: return@postDelayed
+                if (!helper.isCameraOpened) return@postDelayed
+                val size = helper.previewSize ?: return@postDelayed
+                if (beginPreview(helper, size)) {
+                    publishOpened(device, size, helper.supportedSizeList.orEmpty(), _state.value.controls)
+                    watchForFrames(helper, device, helper.supportedSizeList.orEmpty())
+                }
+            }, 1200)
         }
 
         override fun onCameraOpen(device: UsbDevice) {
@@ -164,13 +192,16 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             autoStep = 0
             userRequested = false
             applyPreviewConfig(helper)
-            val controls = _state.value.controls.ifEmpty { readControls() }
-            if (size != null) {
-                beginPreview(helper, size)
-                publishOpened(device, size, supported, controls)
+            val show = size ?: current
+            publishOpened(device, show, supported, _state.value.controls)
+            if (show != null && beginPreview(helper, show)) {
                 watchForFrames(helper, device, supported)
-            } else {
-                publishOpened(device, current, supported, controls)
+            }
+            viewModelScope.launch {
+                val controls = runCatching { readControls() }.getOrDefault(emptyList())
+                _state.update { state ->
+                    if (state.phase == Phase.Preview) state.copy(controls = controls) else state
+                }
             }
         }
 
@@ -180,7 +211,7 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { cameraHelper?.removeSurface(surface) }
             }
             _state.update {
-                val phase = if (it.phase == Phase.Preview) Phase.Opening else it.phase
+                val phase = if (reopenPending) Phase.Opening else it.phase
                 it.copy(
                     phase = phase,
                     previewWidth = 0,
@@ -200,6 +231,11 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
 
         override fun onDetach(device: UsbDevice) {
             Log.i(TAG, "detach ${device.deviceName}")
+            if (KurbasBulkCamera.matches(device)) {
+                kurbas?.stop()
+                kurbas = null
+                framesEnabled.set(false)
+            }
             val wasCurrent = device.deviceName == currentDeviceId
             if (pendingDevice?.deviceName == device.deviceName) pendingDevice = null
             if (wasCurrent) {
@@ -210,6 +246,7 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
                 ladderIndex = 0
                 userRequested = false
                 retuned = false
+                sizeAttempts = 0
             }
             connectInProgress = false
             refreshDevices()
@@ -309,6 +346,7 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         ladder = emptyList()
         ladderIndex = 0
         retuned = false
+        sizeAttempts = 0
         userRequested = false
         connectInProgress = true
         _state.update {
@@ -320,7 +358,129 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         Log.i(TAG, "request permission ${device.deviceName}")
+        if (KurbasBulkCamera.matches(device)) {
+            openKurbas(device)
+            return
+        }
         helper.selectDevice(device)
+    }
+
+    private fun openKurbas(device: UsbDevice) {
+        val manager = usbManager() ?: return
+        if (!manager.hasPermission(device)) {
+            ensureUsbPermissionReceiver()
+            val context = getApplication<Application>()
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+            val pending = PendingIntent.getBroadcast(
+                context,
+                0,
+                Intent(USB_PERMISSION).setPackage(context.packageName),
+                flags,
+            )
+            manager.requestPermission(device, pending)
+            return
+        }
+        startKurbas(device)
+    }
+
+    private fun startKurbas(device: UsbDevice) {
+        kurbas?.stop()
+        connectInProgress = false
+        previewStarted = true
+        sawFrame = false
+        framesEnabled.set(false)
+        currentDeviceId = device.deviceName
+        _state.update {
+            it.copy(
+                phase = Phase.Preview,
+                deviceLabel = device.displayLabel(),
+                notice = null,
+                modeLabel = "640×512 YUY2 · 50 к/с",
+                previewWidth = 640,
+                previewHeight = 512,
+                modes = listOf(
+                    ModeUi(
+                        type = UVCCamera.UVC_VS_FRAME_UNCOMPRESSED,
+                        width = 640,
+                        height = 512,
+                        format = "YUY2",
+                        fps = listOf(50),
+                        activeFps = 50,
+                    ),
+                ),
+                controls = emptyList(),
+                streamNote = "Відкриваю камеру…",
+            )
+        }
+        val reader = KurbasBulkCamera(
+            device = device,
+            open = { usbManager()?.openDevice(device) },
+            onReady = { width, height ->
+                frameWidth = width
+                frameHeight = height
+                frameIsYuy2 = true
+                framesEnabled.set(true)
+                mainHandler.post {
+                    _state.update { state ->
+                        state.copy(
+                            modeLabel = "${width}×${height} YUY2 · 50 к/с",
+                            previewWidth = width,
+                            previewHeight = height,
+                        )
+                    }
+                }
+            },
+            onFrame = { buffer -> deliverFrame(buffer) },
+            onStatus = { text ->
+                mainHandler.post {
+                    if (!sawFrame) _state.update { it.copy(streamNote = text) }
+                }
+            },
+            onFailed = { text ->
+                framesEnabled.set(false)
+                mainHandler.post {
+                    connectInProgress = false
+                    _state.update {
+                        it.copy(
+                            phase = Phase.Error,
+                            streamNote = null,
+                            notice = Notice(SystemClock.elapsedRealtime(), text),
+                        )
+                    }
+                }
+            },
+        )
+        kurbas = reader
+        reader.start()
+    }
+
+    private fun ensureUsbPermissionReceiver() {
+        if (usbPermissionReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != USB_PERMISSION) return
+                val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                val extra = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                }
+                connectInProgress = false
+                if (granted && extra != null && KurbasBulkCamera.matches(extra)) {
+                    startKurbas(extra)
+                }
+            }
+        }
+        val context = getApplication<Application>()
+        val filter = IntentFilter(USB_PERMISSION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+        usbPermissionReceiver = receiver
     }
 
     fun onSurfaceReady(surface: Surface) = Unit
@@ -441,6 +601,12 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        kurbas?.stop()
+        kurbas = null
+        usbPermissionReceiver?.let { receiver ->
+            runCatching { getApplication<Application>().unregisterReceiver(receiver) }
+        }
+        usbPermissionReceiver = null
         val helper = cameraHelper
         cameraHelper = null
         onVideoFrame = null
@@ -455,20 +621,73 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
-    private fun beginPreview(helper: CameraHelper, size: Size) {
+    private fun beginPreview(helper: CameraHelper, size: Size): Boolean {
+        val current = helper.previewSize
+        val samePicture = current != null &&
+            size.type == current.type &&
+            size.width == current.width &&
+            size.height == current.height &&
+            (!userRequested || size.fps == current.fps)
+        synchronized(this) {
+            if (previewStarted && samePicture) return true
+            previewStarted = true
+        }
         framesEnabled.set(false)
         frameBusy.set(false)
         sawFrame = false
         runCatching { helper.setFrameCallback(null, 0) }
         runCatching { helper.stopPreview() }
         runCatching { helper.setPreviewSize(size) }
+        if (!helper.isCameraOpened) {
+            Log.w(TAG, "setPreviewSize closed the camera, reopen $size")
+            reopenPending = true
+            openCamera(size)
+            resumeAfterReopen(size)
+            return false
+        }
         armFrames(size)
-        frameIsYuy2 = size.type == UVCCamera.UVC_VS_FRAME_UNCOMPRESSED
-        val pixels = if (frameIsYuy2) UVCCamera.PIXEL_FORMAT_RAW else UVCCamera.PIXEL_FORMAT_RGB565
-        runCatching { helper.setFrameCallback(frameCallback, pixels) }
+        // MJPEG frames are already RGB565 when they reach Java.
+        // An uncompressed camera sends YUY2. That packing is copied through
+        // unchanged and turned into RGB565 here, including when the native
+        // RGB conversion does not accept the frame.
+        val uncompressed = size.type != UVCCamera.UVC_VS_FRAME_MJPEG
+        frameIsYuy2 = uncompressed
+        val pixelFormat = if (uncompressed) {
+            UVCCamera.PIXEL_FORMAT_RAW
+        } else {
+            UVCCamera.PIXEL_FORMAT_RGB565
+        }
+        runCatching { helper.setFrameCallback(frameCallback, pixelFormat) }
         startPicture(helper, size)
         framesEnabled.set(frameWidth > 0 && frameHeight > 0)
         lastGood = size.clone()
+        watchStream()
+        return true
+    }
+
+    private var streamWatch = 0
+
+    private fun watchStream() {
+        val watch = ++streamWatch
+        val tick = object : Runnable {
+            override fun run() {
+                if (watch != streamWatch) return
+                if (sawFrame) {
+                    _state.update { it.copy(streamNote = null) }
+                    return
+                }
+                val note = streamNote(UVCCamera.getStreamStatus().orEmpty())
+                _state.update { it.copy(streamNote = note) }
+                mainHandler.postDelayed(this, 500)
+            }
+        }
+        mainHandler.postDelayed(tick, 400)
+    }
+
+    private fun streamNote(raw: String): String {
+        val n = raw.split(" ").mapNotNull { it.toIntOrNull() }
+        if (n.size < 7) return "Потік ще не відкрився"
+        return "Пакети ${n[0]}, блок ${n[2]}, останній ${n[6]}, кадри ${n[3]}, старт ${n[4]}, стан ${n[5]}"
     }
 
     private fun watchForFrames(helper: CameraHelper, device: UsbDevice, supported: List<Size>) {
@@ -519,17 +738,26 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         }
         val source = frame.duplicate()
         source.clear()
-        if (source.remaining() < bytes) {
+        val available = source.remaining()
+        if (available <= 0) {
             frameBusy.set(false)
             return
         }
+        val first = !sawFrame
         sawFrame = true
+        if (first) {
+            mainHandler.post { _state.update { it.copy(streamNote = null) } }
+        }
+        val copySize = minOf(available, bytes)
         var copy = frameCopy
         if (copy.size != bytes) {
             copy = ByteArray(bytes)
             frameCopy = copy
         }
-        source.get(copy)
+        source.get(copy, 0, copySize)
+        if (copySize < bytes) {
+            java.util.Arrays.fill(copy, copySize, bytes, 0)
+        }
         if (frameIsYuy2) {
             convertHandler.post {
                 val rgb = rgbBytes(width, height)
@@ -557,6 +785,34 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
         val bytes = width * height * 2
         if (rgbOut.size != bytes) rgbOut = ByteArray(bytes)
         return rgbOut
+    }
+
+    private fun resumeAfterReopen(size: Size) {
+        val generation = ++reopenGeneration
+        mainHandler.postDelayed({
+            reopenPending = false
+            if (generation != reopenGeneration) return@postDelayed
+            val helper = cameraHelper ?: return@postDelayed
+            val device = pendingDevice ?: return@postDelayed
+            if (!helper.isCameraOpened) {
+                showOpenFailure(null)
+                return@postDelayed
+            }
+            sizeAttempts = 0
+            val opened = helper.previewSize ?: size
+            armFrames(opened)
+            frameIsYuy2 = opened.type != UVCCamera.UVC_VS_FRAME_MJPEG
+            val pixelFormat = if (frameIsYuy2) {
+                UVCCamera.PIXEL_FORMAT_RAW
+            } else {
+                UVCCamera.PIXEL_FORMAT_RGB565
+            }
+            runCatching { helper.setFrameCallback(frameCallback, pixelFormat) }
+            startPicture(helper, opened)
+            framesEnabled.set(frameWidth > 0 && frameHeight > 0)
+            lastGood = opened.clone()
+            publishOpened(device, opened, helper.supportedSizeList.orEmpty(), _state.value.controls)
+        }, 700)
     }
 
     private fun openCamera(size: Size) {
@@ -726,6 +982,7 @@ class UvcViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "UvcViewer"
+        private const val USB_PERMISSION = "ua.uvc.viewer.USB_PERMISSION"
 
         private fun valueToPercent(limits: IntArray?, value: Int): Int {
             if (limits == null || limits.size < 2) return 0

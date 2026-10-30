@@ -21,11 +21,15 @@ internal fun Size.fpsChoices(): List<Int> {
 }
 
 internal fun preferredFps(choices: List<Int>, fallback: Int): Int {
-    if (choices.isEmpty()) return fallback.coerceIn(1, 30)
-    for (wanted in intArrayOf(30, 15, 20, 25, 10, 5)) {
+    if (choices.isEmpty()) {
+        return if (fallback == 50 || fallback in 1..30) fallback else 30
+    }
+    // 30 stays first. 50 is a real rate: the bulk YUY2 camera lists only 50.
+    // 60 is left out of this list on purpose.
+    for (wanted in intArrayOf(30, 50, 25, 20, 15, 10, 5)) {
         if (wanted in choices) return wanted
     }
-    return choices.filter { it <= 30 }.maxOrNull() ?: choices.min()
+    return choices.filter { it in 1..50 }.maxOrNull() ?: choices.min()
 }
 
 internal fun formatName(type: Int): String = when (type) {

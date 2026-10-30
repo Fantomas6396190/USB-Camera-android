@@ -165,6 +165,19 @@ fun ViewerScreen(
             )
         }
 
+        val streamNote = state.streamNote
+        if (state.phase == Phase.Preview && streamNote != null) {
+            Text(
+                text = streamNote,
+                color = Color.White,
+                fontSize = 16.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 24.dp),
+            )
+        }
+
         if (!fullscreen) Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)

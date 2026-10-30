@@ -2,9 +2,9 @@
 
 Android-програма для живого перегляду відео з USB-камер, які працюють як стандартний UVC. Окремий драйвер виробника не потрібен. Програма лише показує картинку: не робить фото, не записує відео і не просить доступ до пам’яті.
 
-Поточна версія **2.4** (`versionCode` 15). Готовий файл для телефона: [`USB-Camera.apk`](USB-Camera.apk).
+Поточна версія **4.5** (`versionCode` 36). Готовий файл для телефона: [`USB-Camera.apk`](USB-Camera.apk).
 
-English summary: a view-only Android app for standard USB Video Class cameras (webcams, endoscopes, capture cards). No vendor driver, no photos, no recording, no storage permission. On connect it opens the largest MJPEG mode at 30 fps and steps down to a smaller mode if that one sends no frames. Double-tap hides the controls for a full-screen picture. A reticle can be switched on from the top bar. Install [`USB-Camera.apk`](USB-Camera.apk) (version 2.4). Android 8.0 or newer with USB host is required.
+English summary: a view-only Android app for standard USB Video Class cameras (webcams, endoscopes, capture cards). No vendor driver, no photos, no recording, no storage permission. On connect it opens the largest MJPEG mode at 30 fps and steps down to a smaller mode if that one sends no frames. A camera that lists only 50 fps opens at 50. The bulk YUY2 camera `5474:FFFF` (Kurbas 640, 640×512 at 50 fps) is shown from version 4.5. Double-tap hides the controls for a full-screen picture. A reticle can be switched on from the top bar. Install [`USB-Camera.apk`](USB-Camera.apk) (version 4.5). Android 8.0 or newer with USB host is required.
 
 ## Встановлення
 
@@ -34,7 +34,7 @@ English summary: a view-only Android app for standard USB Video Class cameras (w
 
 ## Як вибирається режим
 
-На старті береться найбільша роздільність **MJPEG** і частота **30** кадрів/с, якщо камера її має. Якщо 30 немає, далі пробуються 15, 20, 25, 10 і 5. Частота 60 не вибирається сама: багато дешевих камер її оголошують, але кадрів не надсилають, і екран лишається чорним.
+На старті береться найбільша роздільність **MJPEG** і частота **30** кадрів/с, якщо камера її має. Якщо 30 немає, далі пробуються 50, 25, 20, 15, 10 і 5. Частота 60 не вибирається сама, коли в описі є менша: багато дешевих камер її оголошують, але кадрів не надсилають. Якщо в описі є лише 60, відкриття йде на 60. Якщо в описі є лише 50, старт одразу на 50.
 
 Потік запускається так само, як ручна зміна формату: зупинка, встановлення розміру, знову старт. Якщо за півтори секунди не прийшов жоден кадр, програма переходить на наступну меншу роздільність і пробує знову, аж поки картинка не з’явиться або режими не закінчаться.
 
@@ -54,6 +54,7 @@ English summary: a view-only Android app for standard USB Video Class cameras (w
 | HD USB Camera | `32E4:9310` | 1280×720, 960×720, 800×600, 640×480, 352×288, 320×240, 176×144, 160×120 | Лише 30 к/с. 15 к/с немає, тому запит 15 к/с змушував бібліотеку стрибати на 1280×720. |
 | GENERAL WEBCAM | `1B3F:2247` | 1920×1080, 1280×720, 800×600, 800×480, 640×480, 640×360, 320×240, 176×144 | Лише 30 к/с. Типовий кадр пристрою — 1920×1080; якщо з нього немає кадрів, програма спускається нижче. YUY2 є лише до 640×480. |
 | Camera, тепловий модуль | `3474:43E1` | Немає | Лише YUY2 640×512 на 30 к/с, близько 157 Мбіт/с. Деталі нижче. |
+| Kurbas 640, UVC Video | `5474:FFFF` | Немає | Лише YUY2 640×512 на 50 к/с, bulk. З версії 4.5 картинка є. Деталі нижче. |
 | AFN_Cap video | `0002:AFA1` | До 1920×1080, також 1280×720, 800×600, 720×576, 720×480, 640×480 і менші | Плата захоплення, не сенсор. Без сигналу на вході вікно чорне. YUY2 є до 720×576. |
 
 ### Тепловий модуль `3474:43E1`
@@ -75,6 +76,12 @@ English summary: a view-only Android app for standard USB Video Class cameras (w
 | 16 | червоний | плюс живлення, 5 В |
 
 Послідовним портом модуль приймає команди: яскравість, контраст, палітра, дзеркало, цифровий зум, корекція шторки, вибір виходу USB або аналогового PAL/NTSC. Стиснений MJPEG і USB 3.0 командою не з’являються. На шлейфі лінії підписані RS232 і розведені на DB9, а UART на платі модуля працює від 3,3 В. Звичайний COM-порт комп’ютера дає близько ±12 В і без перетворювача рівнів може пошкодити модуль. Список команд Raytron віддає разом із програмою Thermal Cam і SDK, у відкритому доступі його немає.
+
+### Kurbas 640 `5474:FFFF`
+
+Windows показує її як **UVC Video**. Серійний номер перевіреного примірника `202509031917`. USB 2.0, одна bulk-точка, пакет 512 байт. MJPEG немає. Єдиний режим — YUY2 640×512 на 50 кадрів/с. Яскравості, контрасту й експозиції в описі немає.
+
+З версії 4.5 цю камеру відкриває `KurbasBulkCamera.kt`: один запит формату (SET, GET і підтвердження) і чотири читання `UsbRequest`. Кожне завершене читання — один шматок кадру зі своїм заголовком. Решта камер лишається на бібліотеці UVC.
 
 ### Плата захоплення `0002:AFA1`
 
@@ -130,13 +137,14 @@ Linux і macOS:
 
 - `app/src/main/java/ua/uvc/viewer/MainActivity.kt` — вікно програми і передача USB-пристрою з інтента.
 - `ViewerScreen.kt` — інтерфейс. Картинка малюється в `FrameView`: кадр RGB565 копіюється в растр, поворот і дзеркало застосовуються під час малювання. Подвійний дотик ховає меню. Приціл малюється поверх центра зображення.
-- `UvcViewModel.kt` — доступ до USB, відкриття камери, вибір режиму, запасний перехід на меншу роздільність, якщо кадрів немає. Для YUY2 колір рахується поза USB-потоком.
-- `StreamModes.kt` — список режимів, вибір 30 к/с і драбина роздільностей від більшої до меншої.
+- `UvcViewModel.kt` — доступ до USB, відкриття камери, вибір режиму, запасний перехід на меншу роздільність, якщо кадрів немає. Для YUY2 колір рахується поза USB-потоком. Камеру `5474:FFFF` віддає в `KurbasBulkCamera`.
+- `KurbasBulkCamera.kt` — потік Kurbas 640: зонд формату і bulk-читання через `UsbRequest`.
+- `StreamModes.kt` — список режимів, вибір 30 к/с (або 50, якщо 30 в описі немає) і драбина роздільностей від більшої до меншої.
 - `app/src/main/res/xml/device_filter.xml` — які USB-пристрої відкривають програму.
 - `USB-Camera.apk` — остання зібрана налагоджувальна версія для встановлення.
 
 ## Бібліотека
 
-Потік UVC читає [UVCAndroid 1.0.13](https://github.com/shiyinghan/UVCAndroid) (`com.herohan:UVCAndroid`), ліцензія Apache 2.0.
+Потік звичайних камер читає локальну збірку [UVCAndroid 1.0.13](https://github.com/shiyinghan/UVCAndroid) з файлу `app/libs/UVCAndroid-1.0.13.aar`, ліцензія Apache 2.0. Камера `5474:FFFF` цим шляхом картинку не давала. Її відкриває `KurbasBulkCamera.kt`.
 
-Якщо запитаний розмір або частота камері не підходять, ця бібліотека сама підставляє найбільший MJPEG на максимальній частоті. Через це програма не просить 60 к/с і не просить частоту, якої немає в описі пристрою. Невірний виклик `setPreviewSize` знищує відкриту камеру без повідомлення про помилку, тому запасний режим відкривається заново лише після перевірки, що камера ще жива.
+Програма не просить 60 к/с, коли в описі є менша частота, і не просить частоту, якої немає в описі пристрою.
